@@ -1,0 +1,2107 @@
+---
+title: "2017-2021-Webuye-haplotype-analysis"
+author: "Evalyne Nyambura"
+date: "2026-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+```
+
+
+
+```{r install packages}
+
+install.packages(c("tidyverse", "iNEXT", "survival", "survminer", "patchwork", "gridExtra")); if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager"); BiocManager::install("Biostrings")
+
+```
+
+
+
+```{r, load libraries}
+
+library(tidyverse)
+library(iNEXT)
+library(survival)
+library(survminer)
+library(Biostrings)
+library(patchwork)
+library(grid)
+library(gridExtra)
+
+```
+
+
+
+
+
+```{r, load data}
+
+csp_data_2017_2018_2020_2021_human_mosquito_heads <- read_csv("input/csp_2017_2018_2020_2021_humans_mosquito_heads.csv")
+
+csp_data_2017_2018_2020_2021_human_mosquito_heads_with_sequences <- read_csv("input/csp_2017_2018_2020_2021_humans_mosquito_heads_with_sequences.csv")
+
+ama1_data_2017_2018_2020_2021_human_mosquito_heads <- read_csv("input/merged_ama1_2017_2018_2020_2021_data.csv")
+
+ama1_data_2017_2018_2020_2021_human_mosquito_heads_with_sequences <- read_csv("input/merged_ama1_2017_2018_2020_2021_with_sequences.csv")
+
+csp_alignment <- readAAStringSet("input/csp_AA.fasta")
+ama1_alignment <- readAAStringSet("input/ama1_AA.fasta")
+
+```
+
+
+
+
+
+# Figure 1
+```{r, correct sample size and visualization, fig.width=10, fig.height=5, results='asis'}
+
+get_incidence_matrix <- function(data){
+
+  expanded <- data %>%
+    select(sample_name_dbs, haplotype_list) %>%
+    separate_rows(haplotype_list, sep = ",") %>%
+    mutate(haplotype_list = str_trim(haplotype_list)) %>%
+    filter(haplotype_list != "") %>%
+    distinct(sample_name_dbs, haplotype_list)
+
+  df_mat <- expanded %>%
+  mutate(value = 1) %>%
+  pivot_wider(names_from = sample_name_dbs,
+                values_from = value,
+                values_fill = 0)
+
+  mat <- as.matrix(df_mat[,-1])   
+  rownames(mat) <- df_mat$haplotype_list
+  return(mat)
+}
+
+
+csp_mat  <- get_incidence_matrix(csp_data_2017_2018_2020_2021_human_mosquito_heads)
+ama1_mat <- get_incidence_matrix(ama1_data_2017_2018_2020_2021_human_mosquito_heads)
+
+haplos <- list(
+  CSP  = csp_mat,
+  AMA1 = ama1_mat
+)
+out <- iNEXT(
+  x        = haplos,
+  q        = c(0,1,2),
+  datatype = "incidence_raw",   
+  nboot    = 100
+)
+size_based_analysis <- out$iNextEst$size_based %>%
+  filter(Method %in% c("Rarefaction","Extrapolation")) %>%
+  mutate(
+    Method = factor(Method, levels = c("Rarefaction","Extrapolation")),
+  Assemblage_label = case_when(
+  Assemblage == "CSP" ~ "bold('A')~' '~italic(Pf)*'csp C-terminal'",
+  Assemblage == "AMA1" ~ "bold('B')~' '~italic(Pf)*'ama1 domain 1'"
+),
+Order.q = factor(Order.q,
+                     levels = c(0,1,2),
+                     labels = c("q = 0 (Richness)",
+                                "q = 1 (Shannon)",
+                                "q = 2 (Simpson)"))
+  )
+
+# Plot
+Figure_1 <- ggplot(size_based_analysis,
+                     aes(x = t,
+                         y = qD,
+                         color = Order.q,
+                         linetype = Method)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = qD.LCL,
+                  ymax = qD.UCL,
+                  fill = Order.q),
+              alpha = 0.2,
+              color = NA) +
+  facet_wrap(
+  ~ Assemblage_label,
+  labeller = label_parsed
+) +
+  labs(
+    x = "Number of samples",
+    y = "Haplotype diversity",
+    color = "Haplotype diversity",
+    fill  = "Haplotype diversity",
+    linetype = "Method"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 600),
+    breaks = seq(0, 600, by = 100)
+  ) +
+  scale_color_manual(values = c(
+    "q = 0 (Richness)" = "#d7191c",
+    "q = 1 (Shannon)"  = "#fdae61",
+    "q = 2 (Simpson)"  = "#2c7bb6"
+  )) +
+  scale_fill_manual(values = c(
+    "q = 0 (Richness)" = "#d7191c",
+    "q = 1 (Shannon)"  = "#fdae61",
+    "q = 2 (Simpson)"  = "#2c7bb6"
+  )) +
+  
+  scale_linetype_manual(values = c(
+    "Rarefaction" = "solid",
+    "Extrapolation" = "dotted"
+  )) +
+  theme_bw(base_size = 12, base_family = "Arial") +
+  coord_cartesian(clip = "off") +
+theme(
+  text = element_text(colour = "black"),
+  axis.title = element_text(size = 12, face = "bold"),
+  axis.text  = element_text(size = 11),
+  legend.title = element_text(size = 12, face = "bold"),
+  legend.text  = element_text(size = 11),
+  strip.text = element_text(size = 11, face = "plain"),
+  panel.grid.major = element_line(color = "grey85", linewidth = 0.1),
+  panel.grid.minor = element_line(color = "grey92", linewidth = 0.1),
+  plot.margin = margin(t = 10, r = 20, b = 10, l = 35),
+  panel.spacing = unit(1, "lines"))
+
+# Save figure 1
+ggsave(
+  filename = "figures/Fig1.tif", plot = Figure_1, width = 7.5, height = 4, units = "in", dpi = 600, compression = "lzw")
+
+```
+
+
+
+```{r, Calculate persistence for each haplotype}
+
+### Start with csp
+csp_data_2017_2018_2020_2021_human_mosquito_heads <- csp_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    collection_date = dmy(collection_date),  
+    month_year = floor_date(collection_date, "month"),
+    host = ifelse(sample_source == "human", "human", "mosquito")
+  )
+
+# Build full month sequence across the study
+all_months_seq <- seq.Date(
+  from = floor_date(min(csp_data_2017_2018_2020_2021_human_mosquito_heads$collection_date, na.rm = TRUE), "month"),
+  to   = floor_date(max(csp_data_2017_2018_2020_2021_human_mosquito_heads$collection_date, na.rm = TRUE), "month"),
+  by   = "month"
+)
+
+csp_human_mosquito_frequency_per_month <- 
+  csp_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    month_year = factor(month_year, levels = all_months_seq)
+  ) %>%
+  separate_rows(haplotype_list, sep = ",") %>%
+  mutate(
+    haplotype_list = trimws(haplotype_list)
+  ) %>%
+  group_by(month_year, haplotype_list) %>%
+  summarise(
+    frequency = n(),
+    hosts_seen = paste(sort(unique(host)), collapse = " & "),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(month_year)) %>%
+  mutate(
+    month_year = as.character(month_year)
+  ) %>%
+  arrange(month_year, haplotype_list)
+
+
+### Move to ama1
+ama1_data_2017_2018_2020_2021_human_mosquito_heads <- ama1_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    collection_date = dmy(collection_date),  
+    month_year = floor_date(collection_date, "month"),
+    host = ifelse(sample_source == "human", "human", "mosquito")
+  )
+
+# Build full month sequence across the study
+all_months_seq <- seq.Date(
+  from = floor_date(min(ama1_data_2017_2018_2020_2021_human_mosquito_heads$collection_date, na.rm = TRUE), "month"),
+  to   = floor_date(max(ama1_data_2017_2018_2020_2021_human_mosquito_heads$collection_date, na.rm = TRUE), "month"),
+  by   = "month"
+)
+
+ama1_human_mosquito_frequency_per_month <- 
+  ama1_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    month_year = factor(month_year, levels = all_months_seq)
+  ) %>%
+  separate_rows(haplotype_list, sep = ",") %>%
+  mutate(
+    haplotype_list = trimws(haplotype_list)
+  ) %>%
+  group_by(month_year, haplotype_list) %>%
+  summarise(
+    frequency = n(),
+    hosts_seen = paste(sort(unique(host)), collapse = " & "),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(month_year)) %>%
+  mutate(
+    month_year = as.character(month_year)
+  ) %>%
+  arrange(month_year, haplotype_list)
+
+```
+
+
+
+
+
+
+
+
+# Figure 2
+```{r, distribution of haplotypes by host, fig.width=12, fig.height=4, results='asis'}
+
+### Start with csp
+# Sort haplotypes numerically within haplotype_list
+csp_data_2017_2018_2020_2021_human_mosquito_heads <- csp_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    haplotype_list = haplotype_list %>%
+      str_split(",") %>%
+      lapply(function(x) {
+        x <- str_trim(x)                                      
+        x[order(as.numeric(str_remove(x, "H")))]              
+      }) %>%
+      sapply(function(x) paste(x, collapse = ","))
+  )
+
+# Expand haplotype_list into long format & standardise host values
+csp_proportion_of_shared_haplotypes <- csp_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  separate_rows(haplotype_list, sep = ",") %>%
+  mutate(
+    haplotype_list = str_trim(haplotype_list),
+    host_std = case_when(
+      str_detect(sample_source, "mosquito_head") ~ "mosquito_head",  
+      sample_source == "human" ~ "human",
+      TRUE ~ sample_source
+    )
+  )
+
+# Classify each haplotype by host(s) it is found in
+csp_haplotype_host_seen <- csp_proportion_of_shared_haplotypes %>%
+  distinct(haplotype_list, host_std) %>%
+  group_by(haplotype_list) %>%
+  summarise(
+    hosts_seen = paste(sort(unique(host_std)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    classification = case_when(
+      hosts_seen == "human" ~ "Human-only",
+      hosts_seen == "mosquito_head" ~ "Mosquito-only",
+      hosts_seen == "human, mosquito_head" ~ "Both",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  arrange(as.numeric(str_remove(haplotype_list, "H"))) 
+
+csp_haplotype_host_timepoint_seen <- csp_proportion_of_shared_haplotypes %>%
+  distinct(haplotype_list, host_std, timepoint) %>% 
+  group_by(haplotype_list) %>%
+  summarise(
+    hosts_seen = paste(sort(unique(host_std)), collapse = ", "),
+    timepoints_seen = paste(sort(unique(timepoint)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    host_classification = case_when(
+      hosts_seen == "human" ~ "Human-only",
+      hosts_seen == "mosquito_head" ~ "Mosquito-only",
+      hosts_seen == "human, mosquito_head" ~ "Both",
+      TRUE ~ NA_character_
+    ),
+    timepoint_classification = case_when(
+      timepoints_seen == "2017-2018" ~ "2017-2018 only",
+      timepoints_seen == "2020-2021" ~ "2020-2021 only",
+      timepoints_seen == "2017-2018, 2020-2021" ~ "Both",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  arrange(as.numeric(str_remove(haplotype_list, "H")))
+
+csp_host_distribution <- csp_haplotype_host_timepoint_seen %>%
+  mutate(
+    Haplotype_classification = case_when(
+      hosts_seen == "human" ~ "Human-specific",
+      hosts_seen == "mosquito_head" ~ "Mosquito-specific",
+      grepl("human", hosts_seen) &
+        grepl("mosquito_head", hosts_seen) ~ "Shared"
+    ),
+    antigen = "CSP"
+  ) %>%
+  group_by(antigen, Haplotype_classification) %>%
+  summarise(count = n(), .groups = "drop")
+
+### AMA1
+# Sort haplotypes numerically within haplotype_list
+ama1_data_2017_2018_2020_2021_human_mosquito_heads <- ama1_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    haplotype_list = haplotype_list %>%
+      str_split(",") %>%
+      lapply(function(x) {
+        x <- str_trim(x)                                      
+        x[order(as.numeric(str_remove(x, "H")))]              
+      }) %>%
+      sapply(function(x) paste(x, collapse = ","))
+  )
+
+# Expand haplotype_list into long format & standardise host values
+ama1_proportion_of_shared_haplotypes <- ama1_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  separate_rows(haplotype_list, sep = ",") %>%
+  mutate(
+    haplotype_list = str_trim(haplotype_list),
+    host_std = case_when(
+      str_detect(sample_source, "mosquito_head") ~ "mosquito_head",  
+      sample_source == "human" ~ "human",
+      TRUE ~ sample_source
+    )
+  )
+
+# Classify each haplotype by host(s) it is found in
+ama1_haplotype_host_seen <- ama1_proportion_of_shared_haplotypes %>%
+  distinct(haplotype_list, host_std) %>%
+  group_by(haplotype_list) %>%
+  summarise(
+    hosts_seen = paste(sort(unique(host_std)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    classification = case_when(
+      hosts_seen == "human" ~ "Human-only",
+      hosts_seen == "mosquito_head" ~ "Mosquito-only",
+      hosts_seen == "human, mosquito_head" ~ "Both",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  arrange(as.numeric(str_remove(haplotype_list, "H"))) 
+
+ama1_haplotype_host_timepoint_seen <- ama1_proportion_of_shared_haplotypes %>%
+  distinct(haplotype_list, host_std, timepoint) %>%  
+  group_by(haplotype_list) %>%
+  summarise(
+    hosts_seen = paste(sort(unique(host_std)), collapse = ", "),
+    timepoints_seen = paste(sort(unique(timepoint)), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    host_classification = case_when(
+      hosts_seen == "human" ~ "Human-only",
+      hosts_seen == "mosquito_head" ~ "Mosquito-only",
+      hosts_seen == "human, mosquito_head" ~ "Both",
+      TRUE ~ NA_character_
+    ),
+    timepoint_classification = case_when(
+      timepoints_seen == "2017-2018" ~ "2017-2018 only",
+      timepoints_seen == "2020-2021" ~ "2020-2021 only",
+      timepoints_seen == "2017-2018, 2020-2021" ~ "Both",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  arrange(as.numeric(str_remove(haplotype_list, "H")))
+
+
+ama1_host_distribution <- ama1_haplotype_host_timepoint_seen %>%
+  mutate(
+    Haplotype_classification = case_when(
+      hosts_seen == "human" ~ "Human-specific",
+      hosts_seen == "mosquito_head" ~ "Mosquito-specific",
+      grepl("human", hosts_seen) &
+        grepl("mosquito_head", hosts_seen) ~ "Shared"
+    ),
+    antigen = "AMA1"
+  ) %>%
+  group_by(antigen, Haplotype_classification) %>%
+  summarise(count = n(), .groups = "drop")
+
+
+# Combine csp and ama1 datasets
+distribution_by_host_ama1_csp_combined_data <- bind_rows(csp_host_distribution, ama1_host_distribution)
+
+
+# Keep antigen names simple 
+distribution_by_host_ama1_csp_combined_data$antigen <- recode(
+  distribution_by_host_ama1_csp_combined_data$antigen,
+  "CSP"  = "CSP",
+  "ama1" = "AMA1"
+)
+
+# Factor order: Human then Shared then Mosquito
+distribution_by_host_ama1_csp_combined_data$Haplotype_classification <- factor(
+  distribution_by_host_ama1_csp_combined_data$Haplotype_classification,
+  levels = c("Human-specific", "Shared", "Mosquito-specific")
+)
+
+# Compute proportions
+distribution_by_host_ama1_csp_combined_data <- distribution_by_host_ama1_csp_combined_data %>%
+  group_by(antigen) %>%
+  mutate(prop = count / sum(count))
+
+# Colors
+base_colors <- c(
+  "Human-specific"    = "#2c7bb6",
+  "Shared"            = "#d7191c",
+  "Mosquito-specific" = "#fdae61"
+)
+
+# Plot
+Figure_2 <- ggplot(
+  distribution_by_host_ama1_csp_combined_data,
+  aes(y = antigen, x = prop, fill = Haplotype_classification)
+) +
+  geom_col(width = 0.6, color = "NA") +
+  geom_text(
+    aes(label = count),
+    position = position_stack(vjust = 0.5),
+    color = "white",
+    size = 4,
+    family = "Arial"
+  ) +
+  scale_fill_manual(values = base_colors) +
+  scale_y_discrete(
+    labels = c(
+      "CSP"  = expression(""*italic("Pfcsp")*" C-terminal"),
+      "AMA1" = expression(""*italic("Pfama1")*" domain 1")
+    )
+  ) +
+  scale_x_continuous(
+    expand = c(0, 0.02),
+    limits = c(0, 1.05)
+  ) +
+  labs(
+    x = "Proportion of nucleotide haplotypes",
+    y = NULL,
+    fill = "Haplotype present in:"
+  ) +
+  theme_minimal(base_size = 12, base_family = "Arial") +
+  coord_cartesian(clip = "off") +
+  theme(
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black", linewidth = 0.1),
+    axis.ticks = element_line(color = "black", linewidth = 0.1),
+    axis.text.x = element_text(size = 10, color = "black"),
+    axis.text.y = element_text(size = 11, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 10, color = "black"),
+    legend.key = element_rect(fill = NA, colour = NA),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "vertical",
+    plot.margin = margin(t = 10, r = 20, b = 20, l = 10)
+  ) +
+  guides(fill = guide_legend(reverse = TRUE))
+
+# Save figure 2
+ggsave(
+  filename = "figures/Fig2.tif", plot = Figure_2, width = 7, height = 2.5, units = "in", dpi = 600, compression = "lzw")
+
+```
+
+
+
+
+
+
+
+# Figure 3
+```{r, Fig 3 for the persistence for each antigen, fig.width=15, fig.height=10, results='asis'}
+
+### Start with csp
+csp_haplotype_persistence <- csp_human_mosquito_frequency_per_month %>%
+  group_by(haplotype_list) %>%
+  summarise(
+    Month = n_distinct(month_year),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Persistence_categories = case_when(
+      Month == 1 ~ "Transient",
+      Month >= 2 & Month <= 29 ~ "Intermittent",
+      Month >= 30 ~ "Persistent"
+    )
+  )
+
+# Count haplotypes for each persistence duration
+csp_persistence_for_each_antigen <- csp_haplotype_persistence %>%
+  group_by(Month, Persistence_categories) %>%
+  summarise(
+    Pfcsp_C_terminal_haplotypes = n(),
+    .groups = "drop"
+  )
+
+all_months <- data.frame(Month = 1:37)
+
+csp_persistence_for_each_antigen <- all_months %>%
+  left_join(csp_persistence_for_each_antigen, by = "Month") %>%
+  mutate(
+    Pfcsp_C_terminal_haplotypes = ifelse(
+      is.na(Pfcsp_C_terminal_haplotypes),
+      0,
+      Pfcsp_C_terminal_haplotypes
+    ),
+    Persistence_categories = case_when(
+      Month == 1 ~ "Transient",
+      Month >= 2 & Month <= 29 ~ "Intermittent",
+      Month >= 30 ~ "Persistent"
+    ),
+    Persistence_categories = factor(
+      Persistence_categories,
+      levels = c("Transient", "Intermittent", "Persistent")
+    )
+  )
+
+# Plot figure 3A
+csp_persistence_plot <- ggplot(
+  csp_persistence_for_each_antigen,
+  aes(
+    x = factor(Month, levels = 1:37),
+    y = Pfcsp_C_terminal_haplotypes,
+    fill = Persistence_categories
+  )
+) +
+  geom_bar(stat = "identity") +
+  geom_text(
+    aes(
+      label = ifelse(
+        Pfcsp_C_terminal_haplotypes > 0,
+        Pfcsp_C_terminal_haplotypes,
+        ""
+      )
+    ),
+    vjust = -0.5,
+    size = 3,
+    family = "Arial"
+  ) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(
+    limits = c(0, 250),
+    breaks = seq(0, 250, 50),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "",
+    x = "Months present",
+    y = expression("" * italic("Pfcsp") * " C-terminal haplotypes"),
+    tag = "A",
+    fill = "Persistence category"
+  ) +
+  theme_minimal(base_size = 12, base_family = "Arial") +
+  theme(
+    axis.title.x = element_text(
+      size = 10,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.title.y = element_text(
+      size = 10,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.text.x = element_text(
+      size = 8,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      size = 8,
+      family = "Arial",
+      color = "black"
+    ),
+    legend.title = element_text(
+      size = 12,
+      face = "bold",
+      family = "Arial",
+      color = "black"
+    ),
+    legend.text = element_text(
+      size = 10,
+      family = "Arial",
+      color = "black"
+    ),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "vertical",
+    plot.tag = element_text(
+      size = 12,
+      face = "bold",
+      family = "Arial"
+    ),
+    plot.tag.position = c(0.03, 0.99),
+    panel.grid = element_blank(),
+    axis.line = element_line(
+      color = "black",
+      linewidth = 0.5
+    ),
+    axis.ticks = element_line(color = "black")
+  ) +
+  geom_text(
+    data = subset(
+      csp_persistence_for_each_antigen,
+      Month == 35 &
+        Pfcsp_C_terminal_haplotypes > 0
+    ),
+    aes(
+      x = factor(Month, levels = 1:37),
+      y = Pfcsp_C_terminal_haplotypes,
+      label = "*"
+    ),
+    vjust = -1.5,
+    size = 6,
+    color = "black",
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Transient" = "#377eb8",
+      "Intermittent" = "#ff7f00",
+      "Persistent" = "#4daf4a"
+    ),
+    breaks = c(
+      "Transient",
+      "Intermittent",
+      "Persistent"
+    ))
+
+### Move to ama1
+ama1_haplotype_persistence <- ama1_human_mosquito_frequency_per_month %>%
+  group_by(haplotype_list) %>%
+  summarise(
+    Month = n_distinct(month_year),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Persistence_categories = case_when(
+      Month == 1 ~ "Transient",
+      Month >= 2 & Month <= 29 ~ "Intermittent",
+      Month >= 30 ~ "Persistent"
+    )
+  )
+
+# Count haplotypes for each persistence duration
+ama1_persistence_for_each_antigen <- ama1_haplotype_persistence %>%
+  group_by(Month, Persistence_categories) %>%
+  summarise(
+    Pfama1_domain_1_haplotypes = n(),
+    .groups = "drop"
+  )
+
+all_months <- data.frame(Month = 1:37)
+
+ama1_persistence_for_each_antigen <- all_months %>%
+  left_join(ama1_persistence_for_each_antigen, by = "Month") %>%
+  mutate(
+    Pfama1_domain_1_haplotypes = ifelse(
+      is.na(Pfama1_domain_1_haplotypes),
+      0,
+      Pfama1_domain_1_haplotypes
+    ),
+    Persistence_categories = case_when(
+      Month == 1 ~ "Transient",
+      Month >= 2 & Month <= 29 ~ "Intermittent",
+      Month >= 30 ~ "Persistent"
+    ),
+    Persistence_categories = factor(
+      Persistence_categories,
+      levels = c("Transient", "Intermittent", "Persistent")
+    )
+  )
+
+# Plot figure 3B
+ama1_persistence_plot <- ggplot(
+  ama1_persistence_for_each_antigen,
+  aes(
+    x = factor(Month, levels = 1:37),
+    y = Pfama1_domain_1_haplotypes,
+    fill = Persistence_categories
+  )
+) +
+  geom_bar(stat = "identity") +
+  geom_text(
+    aes(
+      label = ifelse(
+        Pfama1_domain_1_haplotypes > 0,
+        Pfama1_domain_1_haplotypes,
+        ""
+      )
+    ),
+    vjust = -0.5,
+    size = 3,
+    family = "Arial"
+  ) +
+  scale_x_discrete(drop = FALSE) +
+  scale_y_continuous(
+    limits = c(0, 250),
+    breaks = seq(0, 250, 50),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "",
+    x = "Months present",
+    y = expression("" * italic("Pfama1") * " domain 1 haplotypes"),
+    tag = "B",
+    fill = "Persistence category"
+  ) +
+  theme_minimal(base_size = 12, base_family = "Arial") +
+  theme(
+    axis.title.x = element_text(
+      size = 10,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.title.y = element_text(
+      size = 10,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.text.x = element_text(
+      size = 8,
+      family = "Arial",
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      size = 8,
+      family = "Arial",
+      color = "black"
+    ),
+    legend.title = element_text(
+      size = 12,
+      face = "bold",
+      family = "Arial",
+      color = "black"
+    ),
+    legend.text = element_text(
+      size = 10,
+      family = "Arial",
+      color = "black"
+    ),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "vertical",
+    plot.tag = element_text(
+      size = 12,
+      face = "bold",
+      family = "Arial"
+    ),
+    plot.tag.position = c(0.03, 0.99),
+    panel.grid = element_blank(),
+    axis.line = element_line(
+      color = "black",
+      linewidth = 0.5
+    ),
+    axis.ticks = element_line(color = "black")
+  ) +
+  geom_text(
+    data = subset(
+      ama1_persistence_for_each_antigen,
+      Month == 32 &
+        Pfama1_domain_1_haplotypes > 0
+    ),
+    aes(
+      x = factor(Month, levels = 1:37),
+      y = Pfama1_domain_1_haplotypes,
+      label = "*"
+    ),
+    vjust = -1.5,
+    size = 6,
+    color = "black",
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Transient" = "#377eb8",
+      "Intermittent" = "#ff7f00",
+      "Persistent" = "#4daf4a"
+    ),
+    breaks = c(
+      "Transient",
+      "Intermittent",
+      "Persistent"
+    ))
+# Combine figure A (csp) and B (ama1)
+Figure_3 <- grid.arrange(
+  csp_persistence_plot, 
+  ama1_persistence_plot, 
+  ncol = 1  
+)
+# Save figure 3
+ggsave(
+  filename = "figures/Fig3.tif", plot = Figure_3, width = 7.5, height = 6, units = "in", dpi = 600, compression = "lzw")
+
+```
+
+
+
+
+
+```{r, Create input data for figure 4 and 5}
+
+# Start with csp
+csp_number_of_occurrences <- csp_human_mosquito_frequency_per_month %>%
+  mutate(
+    month_date = my(month_year),
+    timepoint = case_when(
+      month_date >= as.Date("2017-06-01") &
+        month_date <= as.Date("2018-08-31") ~ "2017-2018",
+      month_date >= as.Date("2020-01-01") &
+        month_date <= as.Date("2021-11-30") ~ "2020-2021",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(timepoint)) %>%
+  group_by(haplotype_list) %>%
+  summarise(
+    number_of_occurrences_2017_2018 =
+      sum(frequency[timepoint == "2017-2018"], na.rm = TRUE),
+    number_of_occurrences_2020_2021 =
+      sum(frequency[timepoint == "2020-2021"], na.rm = TRUE),
+    total_months_active_2017_2018 =
+      n_distinct(month_date[timepoint == "2017-2018"]),
+    total_months_active_2020_2021 =
+      n_distinct(month_date[timepoint == "2020-2021"]),
+    .groups = "drop"
+  ) %>%
+  dplyr::rename(haplotype = haplotype_list)
+
+
+write_csv(csp_number_of_occurrences, "output/csp_human_mosquito_head_haplotype_occurrences_total_months_active.csv")
+
+
+### Move to ama1
+ama1_number_of_occurrences <- ama1_human_mosquito_frequency_per_month %>%
+  mutate(
+    month_date = my(month_year),
+    timepoint = case_when(
+      month_date >= as.Date("2017-06-01") &
+        month_date <= as.Date("2018-08-31") ~ "2017-2018",
+      month_date >= as.Date("2020-01-01") &
+        month_date <= as.Date("2021-11-30") ~ "2020-2021",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(timepoint)) %>%
+  group_by(haplotype_list) %>%
+  summarise(
+    number_of_occurrences_2017_2018 =
+      sum(frequency[timepoint == "2017-2018"], na.rm = TRUE),
+    number_of_occurrences_2020_2021 =
+      sum(frequency[timepoint == "2020-2021"], na.rm = TRUE),
+    total_months_active_2017_2018 =
+      n_distinct(month_date[timepoint == "2017-2018"]),
+    total_months_active_2020_2021 =
+      n_distinct(month_date[timepoint == "2020-2021"]),
+    .groups = "drop"
+  ) %>%
+  dplyr::rename(haplotype = haplotype_list)
+
+write_csv(ama1_number_of_occurrences, "output/ama_human_mosquito_head_haplotype_occurrences_total_months_active.csv")
+
+```
+
+
+
+# Figure 6
+```{r, survival analysis shared and humans, fig.width=7, fig.height=5, results='asis'}
+
+### Start with csp
+csp_hap_surv_human_only <- csp_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  mutate(
+    collection_date = ymd(collection_date),   
+    haplotype_list = str_split(haplotype_list, ",")
+  ) %>%
+  unnest(haplotype_list) %>%
+  mutate(
+    haplotype = str_trim(haplotype_list),
+    year_month = floor_date(collection_date, "month")
+  ) %>%
+  group_by(haplotype) %>%
+  summarise(
+    first_seen = min(collection_date),
+    last_seen = max(collection_date),
+    total_months_seen = n_distinct(year_month),
+    hosts_seen = case_when(
+      all(sample_source == "human") ~ "human",
+      all(sample_source == "mosquito_head") ~ "mosquito_head",
+      TRUE ~ "human, mosquito_head"
+    ),
+    timepoints_seen = "2017-2018",
+    host_classification = case_when(
+      all(sample_source == "human") ~ "Human-only",
+      all(sample_source == "mosquito_head") ~ "Mosquito-only",
+      TRUE ~ "Both"
+    ),
+    timepoint_classification = "2017-2018 only",
+    .groups = "drop"
+  )
+
+csp_hap_surv_human_only <- csp_hap_surv_human_only %>%
+  filter(host_classification != "Mosquito head-only") %>%
+  mutate(host_classification = recode(host_classification,
+                                 "Both" = "Shared",
+                                 "Human-only" = "Human-specific")) %>%
+  mutate(host_classification = factor(host_classification, levels = c("Shared", "Human-specific"))) %>%
+  mutate(
+    time = total_months_seen,
+    event = ifelse(last_seen < max(last_seen), 1, 0)
+  ) %>%
+  droplevels()  
+
+# Kaplan-Meier fit
+fit_csp_human_shared <- survfit(Surv(time, event) ~ host_classification, data = csp_hap_surv_human_only)
+
+
+# Define color palette 
+palette_colors <- c("#d7191c", "#2c7bb6")  # Shared, Human-specific
+
+
+csp_hap_surv_human_only$host_classification <- factor(
+  csp_hap_surv_human_only$host_classification,
+  levels = c("Shared", "Human-specific"),
+  labels = c("Shared", "Human")
+)
+# Fit KM model
+fit_csp_human_shared <- survfit(
+  Surv(time, event) ~ host_classification,
+  data = csp_hap_surv_human_only
+)
+# Generate figure 6A
+csp_km_plot <- ggsurvplot(
+  fit_csp_human_shared,
+  data = csp_hap_surv_human_only,
+  pval = TRUE,
+  pval.size = 2.5,
+  pval.coord = c(5, 1),
+  conf.int = TRUE,
+  censor = FALSE,
+  risk.table = TRUE,
+  fontsize = 3,                 
+  risk.table.col = "strata",
+  risk.table.y.text = FALSE,
+  risk.table.y.text.col = TRUE,
+  tables.height = 0.25,
+  title = "",
+  xlab = "Time since first detection (months)",
+  ylab = "Detection probability",
+  legend.title = "Haplotypes present in:",
+  legend.labs = c("Shared", "Human"),
+  palette = palette_colors
+)
+# Main plot formatting
+csp_km_plot$plot <- csp_km_plot$plot +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(size = 9, family = "Arial"),
+    legend.text = element_text(size = 8, family = "Arial"),
+    axis.text.x = element_text(size = 8, family = "Arial"),
+    axis.text.y = element_text(size = 8, family = "Arial"),
+    axis.title.x = element_text(size = 9, family = "Arial"),
+    axis.title.y = element_text(size = 9, family = "Arial")
+  )
+csp_km_plot$table <- csp_km_plot$table +
+  ggtitle("Number at risk") +
+  labs(x = NULL, y = NULL) +
+  theme(
+    plot.title = element_text(
+      size = 9,
+      family = "Arial",
+      hjust = 0
+    ),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none",
+    axis.text.x = element_text(size = 9, family = "Arial"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+
+# Extract median survival time and confidence intervals
+csp_median_ci <- summary(fit_csp_human_shared)$table[, c("median", "0.95LCL", "0.95UCL")]
+csp_median_df <- data.frame(
+  Host_Category = rownames(summary(fit_csp_human_shared)$table),
+  Median_Months = csp_median_ci[, "median"],
+  Lower_95CI = csp_median_ci[, "0.95LCL"],
+  Upper_95CI = csp_median_ci[, "0.95UCL"]
+)
+
+
+### Move to ama1
+ama1_hap_surv_human_only <- ama1_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  filter(
+    timepoint == "2017-2018",
+    !is.na(haplotype_list)
+  ) %>%
+  mutate(
+    collection_date = ymd(collection_date),   
+    haplotype_list = str_split(haplotype_list, ",")
+  ) %>%
+  unnest(haplotype_list) %>%
+  mutate(
+    haplotype = str_trim(haplotype_list),
+    year_month = floor_date(collection_date, "month")
+  ) %>%
+  group_by(haplotype) %>%
+  summarise(
+    first_seen = min(collection_date),
+    last_seen = max(collection_date),
+    total_months_seen = n_distinct(year_month),
+    hosts_seen = case_when(
+      all(sample_source == "human") ~ "human",
+      all(sample_source == "mosquito_head") ~ "mosquito_head",
+      TRUE ~ "human, mosquito_head"
+    ),
+    timepoints_seen = "2017-2018",
+    host_classification = case_when(
+      all(sample_source == "human") ~ "Human-only",
+      all(sample_source == "mosquito_head") ~ "Mosquito-only",
+      TRUE ~ "Both"
+    ),
+    timepoint_classification = "2017-2018 only",
+    .groups = "drop"
+  )
+
+ama1_hap_surv_human_only <- ama1_hap_surv_human_only %>%
+  filter(host_classification != "Mosquito head-only") %>%
+  mutate(host_classification = recode(host_classification,
+                                 "Both" = "Shared",
+                                 "Human-only" = "Human-specific")) %>%
+  mutate(host_classification = factor(host_classification, levels = c("Shared", "Human-specific"))) %>%
+  mutate(
+    time = total_months_seen,
+    event = ifelse(last_seen < max(last_seen), 1, 0)
+  ) %>%
+  droplevels()  
+
+# Kaplan-Meier fit
+fit_ama1_human_shared <- survfit(Surv(time, event) ~ host_classification, data = ama1_hap_surv_human_only)
+
+# Define color palette 
+palette_colors <- c("#d7191c", "#2c7bb6")  # Shared, Human-specific
+
+ama1_hap_surv_human_only$host_classification <- factor(
+  ama1_hap_surv_human_only$host_classification,
+  levels = c("Shared", "Human-specific"),
+  labels = c("Shared", "Human")
+)
+
+# Fit KM model
+fit_ama1_human_shared <- survfit(
+  Surv(time, event) ~ host_classification,
+  data = ama1_hap_surv_human_only
+)
+
+# Generate figure 6B
+ama1_km_plot <- ggsurvplot(
+  fit_ama1_human_shared,
+  data = ama1_hap_surv_human_only,
+  pval = TRUE,
+  pval.size = 2.5,
+  pval.coord = c(5, 1),
+  conf.int = TRUE,
+  censor = FALSE,
+  risk.table = TRUE,
+  fontsize = 3,                 
+  risk.table.col = "strata",
+  risk.table.y.text = FALSE,
+  risk.table.y.text.col = TRUE,
+  tables.height = 0.25,
+  title = "",
+  xlab = "Time since first detection (months)",
+  ylab = "Detection probability",
+  legend.title = "Haplotypes present in:",
+  legend.labs = c("Shared", "Human"),
+  palette = palette_colors
+)
+# Main plot formatting
+ama1_km_plot$plot <- ama1_km_plot$plot +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(size = 9, family = "Arial"),
+    legend.text = element_text(size = 8, family = "Arial"),
+    axis.text.x = element_text(size = 8, family = "Arial"),
+    axis.text.y = element_text(size = 8, family = "Arial"),
+    axis.title.x = element_text(size = 9, family = "Arial"),
+    axis.title.y = element_text(size = 9, family = "Arial")
+  )
+ama1_km_plot$table <- ama1_km_plot$table +
+  ggtitle("Number at risk") +
+  labs(x = NULL, y = NULL) +
+  theme(
+    plot.title = element_text(
+      size = 9,
+      family = "Arial",
+      hjust = 0
+    ),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none",
+    axis.text.x = element_text(size = 9, family = "Arial"),
+    plot.margin = margin(t = 5, r = 5, b = 5, l = 5)
+  )
+
+# Extract median survival time and confidence intervals
+ama1_median_ci <- summary(fit_ama1_human_shared)$table[, c("median", "0.95LCL", "0.95UCL")]
+ama1_median_df <- data.frame(
+  Host_Category = rownames(summary(fit_ama1_human_shared)$table),
+  Median_Months = ama1_median_ci[, "median"],
+  Lower_95CI = ama1_median_ci[, "0.95LCL"],
+  Upper_95CI = ama1_median_ci[, "0.95UCL"]
+)
+
+# Combine figure 6A and 6B
+legend <- get_legend(
+  csp_km_plot$plot +
+    theme(
+      legend.position = "top",
+      legend.direction = "horizontal",
+      legend.box.margin = margin(0, 0, 0, 0),
+      legend.margin = margin(0, 0, 0, 0)
+    )
+)
+csp_km_plot$plot <- csp_km_plot$plot +
+  theme(legend.position = "none")
+ama1_km_plot$plot <- ama1_km_plot$plot +
+  theme(legend.position = "none")
+
+csp_plot_grob  <- ggplotGrob(csp_km_plot$plot)
+csp_table_grob <- ggplotGrob(csp_km_plot$table)
+ama1_plot_grob  <- ggplotGrob(ama1_km_plot$plot)
+ama1_table_grob <- ggplotGrob(ama1_km_plot$table)
+
+csp_widths <- unit.pmax(csp_plot_grob$widths,
+                        csp_table_grob$widths)
+csp_plot_grob$widths  <- csp_widths
+csp_table_grob$widths <- csp_widths
+
+ama1_widths <- unit.pmax(ama1_plot_grob$widths,
+                         ama1_table_grob$widths)
+ama1_plot_grob$widths  <- ama1_widths
+ama1_table_grob$widths <- ama1_widths
+
+# Panel labels
+panel_labels <- arrangeGrob(
+  textGrob(
+    expression(bold("A") ~ italic("Pfcsp") * " C-terminal"),
+    x = 0, y = 0.25, hjust = 0,
+    gp = gpar(fontsize = 12)
+  ),
+  textGrob(
+    expression(bold("B") ~ italic("Pfama1") * " domain 1"),
+    x = 0, y = 0.25, hjust = 0,
+    gp = gpar(fontsize = 12)
+  ),
+  ncol = 2
+)
+
+# CSP panel (Figure 6A)
+csp_panel <- arrangeGrob(
+  csp_plot_grob,
+  csp_table_grob,
+  ncol = 1,
+  heights = c(3, 1)
+)
+
+# AMA1 panel (Figure 6B)
+ama1_panel <- arrangeGrob(
+  ama1_plot_grob,
+  ama1_table_grob,
+  ncol = 1,
+  heights = c(3, 1)
+)
+
+# Combine panels
+combined_panels <- arrangeGrob(
+  csp_panel,
+  ama1_panel,
+  ncol = 2,
+  padding = unit(1.5, "cm")
+)
+Figure_6 <- arrangeGrob(
+  panel_labels,
+  legend,
+  combined_panels,
+  ncol = 1,
+  heights = c(0.05, 0.15, 1)
+)
+# Save figure 6
+tiff(
+  "figures/Fig6.tif", width = 7.5, height = 5, units = "in", res = 600, compression = "lzw")
+grid.newpage()
+grid.draw(Figure_6)
+dev.off()
+
+```
+
+
+# Figure 7
+```{r, check the variable amino acid positions for csp}
+# Highlight the reference sequence in the fasta
+ref <- csp_alignment["csp_reference_aa294_388"]
+
+align_mat <- as.matrix(csp_alignment)
+ref_vec <- strsplit(as.character(ref), "")[[1]]
+
+# Variable positions only
+variable_positions <- which(
+  apply(
+    align_mat[-1, , drop = FALSE],
+    2,
+    function(col) any(col != ref_vec)
+  )
+)
+# Amino acid counts at variable positions
+aa_freq <- data.frame()
+for (pos in variable_positions) {
+  ref_aa <- ref_vec[pos]
+  freq_table <- table(align_mat[-1, pos])
+  aa_freq <- rbind(
+    aa_freq,
+    data.frame(
+      Position = pos + 293,
+      RefAA = ref_aa,
+      VariantAA = names(freq_table),
+      Count = as.numeric(freq_table),
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+# Add 3D7 matching flag
+aa_freq <- aa_freq %>%
+  mutate(
+    `3D7_matching` = if_else(
+      VariantAA == RefAA,
+      "Yes",
+      "No"
+    )
+  )
+
+# Calculate frequencies
+variant_data <- aa_freq %>%
+  group_by(Position) %>%
+  mutate(
+    Total = sum(Count),
+    Frequency = round((Count / Total) * 100, 1)
+  ) %>%
+  ungroup()
+# Prepare plotting data
+variant_data <- variant_data %>%
+  select(
+    Position,
+    Variant = VariantAA,
+    Frequency
+  ) %>%
+  arrange(Position)
+
+# Keep polymorphic positions only
+variant_data_mutations <- variant_data %>%
+  group_by(Position) %>%
+  filter(n_distinct(Variant) > 1) %>%
+  ungroup()
+
+# define Amino acid colours
+get_amino_acid_colors <- function(amino_acids){
+  aa_colors <- c(
+    A = "#1f77b4",
+    V = "#c51b7d",
+    L = "#ffffbf",
+    I = "#4daf4a",
+    M = "#984ea3",
+    C = "#ff7f00",
+    D = "#a65628",
+    E = "#bcbd22",
+    S = "#fde0ef",
+    G = "#999999",
+    N = "#66c2a5",
+    Q = "#fdae61",
+    F = "#8da0cb",
+    H = "#2ca02c",
+    K = "#313695",
+    P = "#1a1a1a",
+    T = "#a50026",
+    R = "#843c39",
+    Y = "#276419"
+  )
+  aa_colors[names(aa_colors) %in% amino_acids]
+}
+
+# Plot figure 7
+create_mutation_plot <- function(variant_data){
+  legend_order <- sort(unique(variant_data$Variant))
+  variant_data$Variant <- factor(
+    variant_data$Variant,
+    levels = legend_order
+  )
+  aa_colors <- get_amino_acid_colors(legend_order)
+  ggplot(
+    variant_data,
+    aes(
+      x = factor(Position),
+      y = Frequency,
+      fill = Variant
+    )
+  ) +
+    geom_col(
+      width = 0.8,
+      colour = "grey30",
+      linewidth = 0.05
+    ) +
+    scale_fill_manual(
+      values = aa_colors,
+      breaks = legend_order,
+      drop = FALSE,
+      guide = guide_legend(
+        nrow = 3,
+        byrow = TRUE
+      )
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, 100, 20),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    labs(
+      x = "Amino acid position",
+      y = "Number of sequences (%)",
+      fill = "Variant"
+    ) +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        hjust = 1,
+        vjust = 0.5,
+        size = 10
+      ),
+      axis.text.y = element_text(size = 11),
+      axis.title.x = element_text(size = 12),
+      axis.title.y = element_text(size = 11),
+      legend.position = "bottom"
+    )
+}
+Figure_7 <- create_mutation_plot(variant_df_mutations)
+
+# save
+ggsave(
+  "figures/Fig7.tiff", plot = Figure_7, width = 8.5, height = 3.5, units = "in",
+  dpi = 600, compression = "lzw", bg = "white")
+
+```
+
+
+# Figure 8
+```{r, check the variable amino acid positions for ama1}
+# Highlight the reference sequence in the fasta
+ref <- ama1_alignment["ama1_reference_aa154_aa252"]
+
+align_mat <- as.matrix(ama1_alignment)
+ref_vec <- strsplit(as.character(ref), "")[[1]]
+
+# Variable positions only
+variable_positions <- which(
+  apply(
+    align_mat[-1, , drop = FALSE],
+    2,
+    function(col) any(col != ref_vec)
+  )
+)
+# Amino acid counts at variable positions
+aa_freq <- data.frame()
+for (pos in variable_positions) {
+  ref_aa <- ref_vec[pos]
+  freq_table <- table(align_mat[-1, pos])
+  aa_freq <- rbind(
+    aa_freq,
+    data.frame(
+      Position = pos + 153,
+      RefAA = ref_aa,
+      VariantAA = names(freq_table),
+      Count = as.numeric(freq_table),
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+# Add 3D7 matching flag
+aa_freq <- aa_freq %>%
+  mutate(
+    `3D7_matching` = if_else(
+      VariantAA == RefAA,
+      "Yes",
+      "No"
+    )
+  )
+
+# Calculate frequencies
+variant_data <- aa_freq %>%
+  group_by(Position) %>%
+  mutate(
+    Total = sum(Count),
+    Frequency = round((Count / Total) * 100, 1)
+  ) %>%
+  ungroup()
+# Prepare plotting data
+variant_data <- variant_data %>%
+  select(
+    Position,
+    Variant = VariantAA,
+    Frequency
+  ) %>%
+  arrange(Position)
+
+# Keep polymorphic positions only
+variant_data_mutations <- variant_data %>%
+  group_by(Position) %>%
+  filter(n_distinct(Variant) > 1) %>%
+  ungroup()
+
+# define Amino acid colours
+get_amino_acid_colors <- function(amino_acids){
+  aa_colors <- c(
+    A = "#1f77b4",
+    V = "#c51b7d",
+    L = "#ffffbf",
+    I = "#4daf4a",
+    M = "#984ea3",
+    C = "#ff7f00",
+    D = "#a65628",
+    E = "#bcbd22",
+    S = "#fde0ef",
+    G = "#999999",
+    N = "#66c2a5",
+    Q = "#fdae61",
+    F = "#8da0cb",
+    H = "#2ca02c",
+    K = "#313695",
+    P = "#1a1a1a",
+    T = "#a50026",
+    R = "#843c39",
+    Y = "#276419"
+  )
+  aa_colors[names(aa_colors) %in% amino_acids]
+}
+
+# Plot figure 8
+create_mutation_plot <- function(variant_data){
+  legend_order <- sort(unique(variant_data$Variant))
+  variant_data$Variant <- factor(
+    variant_data$Variant,
+    levels = legend_order
+  )
+  aa_colors <- get_amino_acid_colors(legend_order)
+  ggplot(
+    variant_data,
+    aes(
+      x = factor(Position),
+      y = Frequency,
+      fill = Variant
+    )
+  ) +
+    geom_col(
+      width = 0.8,
+      colour = "grey30",
+      linewidth = 0.05
+    ) +
+    scale_fill_manual(
+      values = aa_colors,
+      breaks = legend_order,
+      drop = FALSE,
+      guide = guide_legend(
+        nrow = 3,
+        byrow = TRUE
+      )
+    ) +
+    scale_y_continuous(
+      breaks = seq(0, 100, 20),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    labs(
+      x = "Amino acid position",
+      y = "Number of sequences (%)",
+      fill = "Variant"
+    ) +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        hjust = 1,
+        vjust = 0.5,
+        size = 10
+      ),
+      axis.text.y = element_text(size = 11),
+      axis.title.x = element_text(size = 12),
+      axis.title.y = element_text(size = 11),
+      legend.position = "bottom"
+    )
+}
+Figure_8 <- create_mutation_plot(variant_data_mutations)
+
+# save
+ggsave(
+  "figures/Fig8.tiff", plot = Figure_8, width = 8.5, height = 3.5, units = "in",
+  dpi = 600, compression = "lzw", bg = "white")
+
+```
+
+
+# Figure 9
+```{r, calculate Grantham distance for each csp haplotype compared to the 3D7}
+
+csp_haplotypes <- data.frame(
+  haplotype = names(csp_alignment),
+  sequence = sapply(csp_alignment, toupper),
+  stringsAsFactors = FALSE
+)
+
+# Define reference sequence to calculate the distance scores
+ref_seq <- csp_haplotypes$sequence[csp_haplotypes$haplotype == "csp_reference_aa294_388"]
+
+# Grantham matrix
+grantham_matrix <- matrix(c(
+  0,112,111,126,195,91,107,60,86,94,96,106,84,113,27,99,58,148,112,64,
+  112,0,86,96,180,43,54,125,29,97,102,26,91,97,103,110,71,215,194,96,
+  111,86,0,23,139,46,42,80,68,149,153,94,142,158,91,46,65,174,154,133,
+  126,96,23,0,154,61,45,94,81,168,172,101,160,177,108,65,85,181,160,152,
+  195,180,139,154,0,205,194,159,174,198,198,202,196,205,169,112,149,215,194,192,
+  91,43,46,61,205,0,29,87,24,109,113,53,101,116,76,68,42,130,115,96,
+  107,54,42,45,194,29,0,98,40,134,138,56,126,140,93,80,65,152,136,121,
+  60,125,80,94,159,87,98,0,98,135,138,127,127,153,42,56,59,184,147,109,
+  86,29,68,81,174,24,40,98,0,94,99,32,87,100,77,89,47,115,83,84,
+  94,97,149,168,198,109,134,135,94,0,5,102,10,21,95,142,89,61,33,29,
+  96,102,153,172,198,113,138,138,99,5,0,107,15,22,98,145,92,61,36,32,
+  106,26,94,101,202,53,56,127,32,102,107,0,95,102,103,121,78,200,181,110,
+  84,91,142,160,196,101,126,127,87,10,15,95,0,28,87,135,81,67,36,21,
+  113,97,158,177,205,116,140,153,100,21,22,102,28,0,114,155,103,40,22,50,
+  27,103,91,108,169,76,93,42,77,95,98,103,87,114,0,74,38,147,110,68,
+  99,110,46,65,112,68,80,56,89,142,145,121,135,155,74,0,58,177,144,124,
+  58,71,65,85,149,42,65,59,47,89,92,78,81,103,38,58,0,128,92,69,
+  148,215,174,181,215,130,152,184,115,61,61,200,67,40,147,177,128,0,37,88,
+  112,194,154,160,194,115,136,147,83,33,36,181,36,22,110,144,92,37,0,55,
+  64,96,133,152,192,96,121,109,84,29,32,110,21,50,68,124,69,88,55,0
+), nrow = 20, byrow = TRUE)
+
+aa_order <- c("A","R","N","D","C","Q","E","G","H","I",
+              "L","K","M","F","P","S","T","W","Y","V")
+
+rownames(grantham_matrix) <- aa_order
+colnames(grantham_matrix) <- aa_order
+
+calculate_grantham <- function(seq1, seq2, matrix) {
+  s1 <- strsplit(seq1, "")[[1]]
+  s2 <- strsplit(seq2, "")[[1]]
+  if(length(s1) != length(s2)) {
+    stop("Sequences must be same length!")
+  }
+  distances <- mapply(function(a1, a2) {
+     if(a1 == "-" | a2 == "-") return(0)
+    if(a1 == a2) {
+      return(0)
+    } else {
+      return(matrix[a1, a2])
+    }
+  }, s1, s2)
+  return(sum(distances, na.rm = TRUE))
+}
+
+# Calculate distances
+csp_haplotypes$summed_grantham_distance <- sapply(
+  csp_haplotypes$sequence,
+  calculate_grantham,
+  seq2 = ref_seq,
+  matrix = grantham_matrix
+)
+
+# Calculate haplotype occurrences
+csp_haplotype_sample_counts <- csp_data_2017_2018_2020_2021_human_mosquito_heads_with_sequences %>%
+  filter(!is.na(haplotype_list)) %>%
+  mutate(haplotype_list = str_split(haplotype_list, ",")) %>%
+  unnest(haplotype_list) %>%
+  mutate(haplotype = str_trim(haplotype_list)) %>%
+  group_by(haplotype) %>%
+  summarise(
+    n_samples = n_distinct(sample_name_dbs),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_samples))
+
+# merge
+grantham_distance_host_distribution_merged_data <- csp_haplotypes %>%
+  mutate(hap_num = as.numeric(sub("H", "", haplotype))) %>%  
+  arrange(hap_num) %>%                                       
+  select(-hap_num) %>%          
+  left_join(csp_haplotype_sample_counts, by = "haplotype")
+
+# Plot the top ten most frequent haplotypes
+top_haplotypes <- grantham_distance_host_distribution_merged_data %>%
+  arrange(desc(`n_samples`)) %>%  
+  head(10)  
+
+plot_df <- top_haplotypes %>%
+  mutate(
+    Group = ifelse(
+      haplotype == "H1" | summed_grantham_distance == 0,
+      "Identical to 3D7",
+      "Divergent from 3D7"
+    ),
+    Group = factor(
+      Group,
+      levels = c(
+        "Identical to 3D7",
+        "Divergent from 3D7"
+      )
+    )
+  )
+# Order legend
+plot_df$Group <- factor(
+  plot_df$Group,
+  levels = c(
+    "Identical to 3D7",
+    "Divergent from 3D7"
+  )
+)
+max_grantham <- max(plot_df$summed_grantham_distance, na.rm = TRUE)
+
+# plot
+Figure_9 <- ggplot(
+  plot_df,
+  aes(x = summed_grantham_distance, y = `n_samples`,
+      color = Group, shape = Group)
+) +
+  geom_point(size = 3) +   
+  geom_text(
+    aes(
+      label = ifelse(haplotype == "H1",
+                     paste0(haplotype, ""),
+                     haplotype)
+    ),
+    color = "black",
+    vjust = -1,
+    size = 3,
+    family = "Arial"
+  ) + 
+  # Assign colors
+  scale_color_manual(values = c(
+    "Identical to 3D7" = "#ca0020",          
+    "Identical to 3D7" = "#f4a582",
+    "Divergent from 3D7" = "#0571b0"
+  )) + 
+  # Define shapes
+  scale_shape_manual(values = c(
+    "Identical to 3D7" = 8,   
+    "Identical to 3D7" = 18,
+    "Divergent from 3D7" = 18
+  )) + 
+  scale_x_continuous(
+    breaks = seq(0, max_grantham + 100, by = 100)
+  ) + 
+  scale_y_continuous(
+    limits = c(0, 1200),
+    breaks = seq(0, 1200, by = 100)
+  ) + 
+  labs(
+    x = "Summed Grantham distance from the csp 3D7 vaccine sequence",
+    y = "Number of samples",
+    color = "Haplotypes relationship to csp 3D7",
+    shape = "Haplotypes relationship to csp 3D7"
+  ) + 
+  guides(
+    color = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1
+    ),
+    shape = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1
+    )
+  ) + 
+  theme_minimal(base_size = 11, base_family = "Arial") +
+  theme(
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 11, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black"),
+    legend.title = element_text(size = 11),
+    legend.text  = element_text(size = 10),
+    legend.position = "bottom",
+    panel.grid.major = element_line(colour = "grey", linewidth = 0.1),
+    panel.grid.minor = element_line(colour = "grey", linewidth = 0.1),
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.3
+    ), 
+    axis.ticks = element_line(linewidth = 0.3)
+  )
+
+# save
+ggsave(
+  filename = "figures/Fig9.tif", plot = Figure_9, width = 7.5, height = 4.5, units = "in", dpi = 600, compression = "lzw")
+
+```
+
+
+
+# Figure 10
+```{r, calculate Grantham distance for each ama1 haplotype compared to the 3D7}
+
+ama1_haplotypes <- data.frame(
+  haplotype = names(ama1_alignment),
+  sequence = sapply(ama1_alignment, toupper),
+  stringsAsFactors = FALSE
+)
+
+# Define reference sequence to calculate the distance scores
+ref_seq <- ama1_haplotypes$sequence[ama1_haplotypes$haplotype == "ama1_reference_aa154_aa252"]
+
+# Grantham matrix
+grantham_matrix <- matrix(c(
+  0,112,111,126,195,91,107,60,86,94,96,106,84,113,27,99,58,148,112,64,
+  112,0,86,96,180,43,54,125,29,97,102,26,91,97,103,110,71,215,194,96,
+  111,86,0,23,139,46,42,80,68,149,153,94,142,158,91,46,65,174,154,133,
+  126,96,23,0,154,61,45,94,81,168,172,101,160,177,108,65,85,181,160,152,
+  195,180,139,154,0,205,194,159,174,198,198,202,196,205,169,112,149,215,194,192,
+  91,43,46,61,205,0,29,87,24,109,113,53,101,116,76,68,42,130,115,96,
+  107,54,42,45,194,29,0,98,40,134,138,56,126,140,93,80,65,152,136,121,
+  60,125,80,94,159,87,98,0,98,135,138,127,127,153,42,56,59,184,147,109,
+  86,29,68,81,174,24,40,98,0,94,99,32,87,100,77,89,47,115,83,84,
+  94,97,149,168,198,109,134,135,94,0,5,102,10,21,95,142,89,61,33,29,
+  96,102,153,172,198,113,138,138,99,5,0,107,15,22,98,145,92,61,36,32,
+  106,26,94,101,202,53,56,127,32,102,107,0,95,102,103,121,78,200,181,110,
+  84,91,142,160,196,101,126,127,87,10,15,95,0,28,87,135,81,67,36,21,
+  113,97,158,177,205,116,140,153,100,21,22,102,28,0,114,155,103,40,22,50,
+  27,103,91,108,169,76,93,42,77,95,98,103,87,114,0,74,38,147,110,68,
+  99,110,46,65,112,68,80,56,89,142,145,121,135,155,74,0,58,177,144,124,
+  58,71,65,85,149,42,65,59,47,89,92,78,81,103,38,58,0,128,92,69,
+  148,215,174,181,215,130,152,184,115,61,61,200,67,40,147,177,128,0,37,88,
+  112,194,154,160,194,115,136,147,83,33,36,181,36,22,110,144,92,37,0,55,
+  64,96,133,152,192,96,121,109,84,29,32,110,21,50,68,124,69,88,55,0
+), nrow = 20, byrow = TRUE)
+
+aa_order <- c("A","R","N","D","C","Q","E","G","H","I",
+              "L","K","M","F","P","S","T","W","Y","V")
+
+rownames(grantham_matrix) <- aa_order
+colnames(grantham_matrix) <- aa_order
+
+calculate_grantham <- function(seq1, seq2, matrix) {
+  s1 <- strsplit(seq1, "")[[1]]
+  s2 <- strsplit(seq2, "")[[1]]
+  if(length(s1) != length(s2)) {
+    stop("Sequences must be same length!")
+  }
+  distances <- mapply(function(a1, a2) {
+    if(a1 == "-" | a2 == "-") return(0)
+    if(a1 == a2) {
+      return(0)
+    } else {
+      return(matrix[a1, a2])
+    }
+  }, s1, s2)
+  return(sum(distances, na.rm = TRUE))
+}
+# Calculate distances
+ama1_haplotypes$summed_grantham_distance <- sapply(
+  ama1_haplotypes$sequence,
+  calculate_grantham,
+  seq2 = ref_seq,
+  matrix = grantham_matrix
+)
+# Calculate haplotype occurrences
+ama1_haplotype_sample_counts <- ama1_data_2017_2018_2020_2021_human_mosquito_heads_with_sequences %>%
+  filter(!is.na(haplotype_list)) %>%
+  mutate(haplotype_list = str_split(haplotype_list, ",")) %>%
+  unnest(haplotype_list) %>%
+  mutate(haplotype = str_trim(haplotype_list)) %>%
+  group_by(haplotype) %>%
+  summarise(
+    n_samples = n_distinct(sample_name_dbs),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_samples))
+# merge
+ama1_grantham_distance_frequency_merged_data <- ama1_haplotypes %>%
+  mutate(hap_num = as.numeric(sub("H", "", haplotype))) %>%  
+  arrange(hap_num) %>%                                       
+  select(-hap_num) %>%          
+  left_join(csp_haplotype_sample_counts, by = "haplotype")
+
+
+top_haplotypes <- ama1_grantham_distance_frequency_merged_data %>%
+  arrange(desc(`n_samples`)) %>%
+  head(10)
+top_haplotypes$Group <- ifelse(
+  top_haplotypes$haplotype == "H1",
+  "Identical to 3D7",
+  ifelse(
+    top_haplotypes$summed_grantham_distance == 0,
+    "Identical to 3D7",
+    "Divergent from 3D7"
+  )
+)
+plot_df <- top_haplotypes
+plot_df$Group <- factor(
+  plot_df$Group,
+  levels = c(
+    "Identical to 3D7",
+    "Divergent from 3D7"
+  )
+)
+max_grantham <- max(plot_df$summed_grantham_distance, na.rm = TRUE)
+
+# plot figure 10
+Figure_10 <- ggplot(
+  plot_df,
+  aes(x = summed_grantham_distance, y = `n_samples`,
+      color = Group, shape = Group)
+) +
+  geom_point(size = 3) +  
+  geom_text(
+    aes(
+      label = ifelse(haplotype == "H1",
+                     paste0(haplotype, ""),
+                     haplotype)
+    ),
+    color = "black",
+    vjust = -1,
+    size = 3,
+    family = "Arial"
+  ) + 
+  # colors
+  scale_color_manual(values = c(
+    "Identical to 3D7" = "#ca0020",         
+    "Identical to 3D7" = "#f4a582",
+    "Divergent from 3D7" = "#0571b0"
+  )) + 
+  # shapes
+  scale_shape_manual(values = c(
+    "Identical to 3D7" = 8,   
+    "Identical to 3D7" = 18,
+    "Divergent from 3D7" = 18
+  )) + 
+  scale_x_continuous(
+    breaks = seq(0, max_grantham + 100, by = 100)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1200),
+    breaks = seq(0, 1200, by = 100)
+  ) + 
+  labs(
+    x = "Summed Grantham distance from the ama1 3D7 vaccine sequence",
+    y = "Number of samples",
+    color = "Haplotypes relationship to ama1 3D7",
+    shape = "Haplotypes relationship to ama1 3D7"
+  ) + 
+  guides(
+    color = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1
+    ),
+    shape = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1
+    )
+  ) + 
+  theme_minimal(base_size = 11, base_family = "Arial") +
+  theme(
+    axis.title = element_text(size = 11),
+    axis.text.x = element_text(size = 11, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black"),
+    legend.title = element_text(size = 11),
+    legend.text  = element_text(size = 10),
+    legend.position = "bottom",
+    panel.grid.major = element_line(colour = "grey", linewidth = 0.1),
+    panel.grid.minor = element_line(colour = "grey", linewidth = 0.1),
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.3
+    ),
+    axis.ticks = element_line(linewidth = 0.3)
+  )
+# save
+ggsave(
+  filename = "figures/Fig10.tif", plot = Figure_10, width = 7.5, height = 4.5,
+  units = "in", dpi = 600, compression = "lzw")
+
+```
+
+
+
+# Supplementary figure 1
+```{r, Summarise the number of sequences and samples, fig.width=10, fig.height=8, results='asis'}
+
+# ama1 number of samples
+count_number_samples_ama1 <- ama1_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  group_by(timepoint, sample_source) %>%
+  summarise(n_samples = n_distinct(sample_name_dbs), .groups = "drop")
+
+Supplementary_figure_1A <- ggplot(count_number_samples_ama1,
+              aes(x = timepoint, y = n_samples, fill = sample_source)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  geom_text(aes(label = n_samples),
+            position = position_stack(vjust = 0.5), size = 5, family = "Arial", color = "black") +
+  scale_fill_manual(values = c(
+    human = "#d8b365",
+    mosquito_head = "#5ab4ac"
+  )) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 2000)) +
+  labs(
+    x = "Time period",
+    y = "Number of samples",
+    fill = "Sample source",
+    tag = "A",
+    subtitle = expression(italic("Pfama1")~" samples")
+  ) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 12, family = "Arial"),
+    axis.title.y = element_text(size = 12, family = "Arial"),
+    axis.text.x = element_text(size = 10, family = "Arial"),
+    axis.text.y = element_text(size = 10, family = "Arial"),
+    legend.title = element_text(size = 12, family = "Arial"),
+    legend.text = element_text(size = 10, family = "Arial"),
+    plot.tag = element_text(size = 12, face = "bold", family = "Arial"),
+    plot.tag.position = c(0.02, 0.98),
+    plot.subtitle = element_text(size = 12, face = "bold", family = "Arial", hjust = 0.5)
+  )
+
+# csp number of samples
+count_number_samples_csp <- csp_data_2017_2018_2020_2021_human_mosquito_heads %>%
+  group_by(timepoint, sample_source) %>%
+  summarise(n_samples = n_distinct(sample_name_dbs), .groups = "drop")
+
+Supplementary_figure_1B <- ggplot(count_number_samples_csp,
+              aes(x = timepoint, y = n_samples, fill = sample_source)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  geom_text(aes(label = n_samples),
+            position = position_stack(vjust = 0.5), size = 5) +
+  scale_fill_manual(values = c(
+    human = "#d8b365",
+    mosquito_head = "#5ab4ac"
+  )) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 2000)) +
+  labs(
+    x = "Time period",
+    y = "Number of samples",
+    fill = "Sample source",
+    tag = "B",
+    subtitle = expression(italic("Pfcsp")~" samples")
+  ) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 12, family = "Arial"),
+    axis.title.y = element_text(size = 12, family = "Arial"),
+    axis.text.x = element_text(size = 10, family = "Arial"),
+    axis.text.y = element_text(size = 10, family = "Arial"),
+    legend.title = element_text(size = 12, family = "Arial"),
+    legend.text = element_text(size = 10, family = "Arial"),
+    plot.tag = element_text(size = 12, face = "bold", family = "Arial"),
+    plot.tag.position = c(0.02, 0.98),
+    plot.subtitle = element_text(size = 12, face = "bold", family = "Arial", hjust = 0.5)
+  )
+
+panel_samples <- (Supplementary_figure_1A + Supplementary_figure_1B) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "Number of samples") &
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 12, face = "bold", family = "Arial", hjust = 0.5)
+  )
+
+# Look at the number of sequences
+# ama1 sequences
+count_number_sequences_ama1 <- ama1_data_2017_2018_2020_2021_human_mosquito_heads_with_sequences %>%
+  group_by(timepoint, sample_source) %>%
+  summarise(n_sequences = n(), .groups = "drop")
+
+Supplementary_figure_1C <- ggplot(count_number_sequences_ama1,
+              aes(x = timepoint, y = n_sequences, fill = sample_source)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  geom_text(aes(label = n_sequences),
+            position = position_stack(vjust = 0.5), size = 5) +
+  scale_fill_manual(values = c(
+    human = "#d8b365",
+    mosquito_head = "#5ab4ac"
+  )) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6000)) +
+  labs(
+    x = "Time period",
+    y = "Number of sequences",
+    fill = "Sample source",
+    tag = "C",
+    subtitle = expression(italic("Pfama1")~" sequences")
+  ) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 12, family = "Arial"),
+    axis.title.y = element_text(size = 12, family = "Arial"),
+    axis.text.x = element_text(size = 10, family = "Arial"),
+    axis.text.y = element_text(size = 10, family = "Arial"),
+    legend.title = element_text(size = 12, family = "Arial"),
+    legend.text = element_text(size = 10, family = "Arial"),
+    plot.tag = element_text(size = 12, face = "bold", family = "Arial"),
+    plot.tag.position = c(0.02, 0.98),
+    plot.subtitle = element_text(size = 12, face = "bold", family = "Arial", hjust = 0.5)
+  )
+
+# Number of sequences for csp
+count_number_sequences_csp <- csp_data_2017_2018_2020_2021_human_mosquito_heads_with_sequences %>%
+  group_by(timepoint, sample_source) %>%
+  summarise(n_sequences = n(), .groups = "drop")
+
+Supplementary_figure_1D <- ggplot(count_number_sequences_csp,
+              aes(x = timepoint, y = n_sequences, fill = sample_source)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  geom_text(aes(label = n_sequences),
+            position = position_stack(vjust = 0.5), size = 5) +
+  scale_fill_manual(values = c(
+    human = "#d8b365",
+    mosquito_head = "#5ab4ac"
+  )) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 6000)) +
+  labs(
+    x = "Time period",
+    y = "Number of sequences",
+    fill = "Sample source",
+    tag = "D",
+    subtitle = expression(italic("Pfcsp")~" sequences")
+  ) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 12, family = "Arial"),
+    axis.title.y = element_text(size = 12, family = "Arial"),
+    axis.text.x = element_text(size = 10, family = "Arial"),
+    axis.text.y = element_text(size = 10, family = "Arial"),
+    legend.title = element_text(size = 12, family = "Arial"),
+    legend.text = element_text(size = 10, family = "Arial"),
+    plot.tag = element_text(size = 12, face = "bold", family = "Arial"),
+    plot.tag.position = c(0.02, 0.98),
+    plot.subtitle = element_text(size = 12, face = "bold", family = "Arial", hjust = 0.5)
+  )
+panel_sequences <- (Supplementary_figure_1C + Supplementary_figure_1D) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "Number of sequences") &
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 12, face = "bold", family = "Arial", hjust = 0.5)
+  )
+# Combine all the panels
+Supplementary_figure_1 <- panel_samples / plot_spacer() / panel_sequences +
+  plot_layout(heights = c(1, 0.08, 1))
+
+
+ggsave(
+  filename = "figures/Supplementary_fig1.tif", plot = Supplementary_figure_1, width = 7.5, height = 8.5, units = "in", dpi = 600, compression = "lzw")
+
+```
+
+
+
+
