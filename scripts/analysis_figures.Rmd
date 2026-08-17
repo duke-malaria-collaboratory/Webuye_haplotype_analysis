@@ -1848,106 +1848,132 @@ ama1_grantham_distance_frequency_merged_data <- ama1_haplotypes %>%
   mutate(hap_num = as.numeric(sub("H", "", haplotype))) %>%  
   arrange(hap_num) %>%                                       
   select(-hap_num) %>%          
-  left_join(csp_haplotype_sample_counts, by = "haplotype")
+  left_join(ama1_haplotype_sample_counts, by = "haplotype")
 
 
-top_haplotypes <- ama1_grantham_distance_frequency_merged_data %>%
-  arrange(desc(`n_samples`)) %>%
-  head(10)
-top_haplotypes$Group <- ifelse(
-  top_haplotypes$haplotype == "H1",
-  "Identical to 3D7",
-  ifelse(
-    top_haplotypes$summed_grantham_distance == 0,
-    "Identical to 3D7",
-    "Divergent from 3D7"
+# Top 10 haplotypes by frequency
+top10 <- ama1_grantham_distance_frequency_merged_data %>%
+  dplyr::arrange(dplyr::desc(n_samples)) %>%
+  head(10) %>%
+  dplyr::pull(haplotype)
+
+# Create plotting dataset
+plot_df <- ama1_grantham_distance_frequency_merged_data %>%
+  mutate(
+    Group = case_when(
+      summed_grantham_distance == 0 ~ "Identical to 3D7",
+      haplotype %in% top10 ~ "Top 10 haplotypes",
+      TRUE ~ "Other haplotypes"
+    )
   )
-)
-plot_df <- top_haplotypes
+# Control legend order
 plot_df$Group <- factor(
   plot_df$Group,
   levels = c(
     "Identical to 3D7",
-    "Divergent from 3D7"
+    "Top 10 haplotypes",
+    "Other haplotypes"
   )
 )
-max_grantham <- max(plot_df$summed_grantham_distance, na.rm = TRUE)
 
-# plot figure 10
-Figure_10 <- ggplot(
+Figure_10_plot <- ggplot(
   plot_df,
-  aes(x = summed_grantham_distance, y = `n_samples`,
-      color = Group, shape = Group)
-) +
-  geom_point(size = 3) +  
-  geom_text(
-    aes(
-      label = ifelse(haplotype == "H1",
-                     paste0(haplotype, ""),
-                     haplotype)
-    ),
-    color = "black",
-    vjust = -1,
-    size = 3,
-    family = "Arial"
-  ) + 
-  # colors
-  scale_color_manual(values = c(
-    "Identical to 3D7" = "#ca0020",         
-    "Identical to 3D7" = "#f4a582",
-    "Divergent from 3D7" = "#0571b0"
-  )) + 
-  # shapes
-  scale_shape_manual(values = c(
-    "Identical to 3D7" = 8,   
-    "Identical to 3D7" = 18,
-    "Divergent from 3D7" = 18
-  )) + 
-  scale_x_continuous(
-    breaks = seq(0, max_grantham + 100, by = 100)
-  ) +
-  scale_y_continuous(
-    limits = c(0, 1200),
-    breaks = seq(0, 1200, by = 100)
-  ) + 
-  labs(
-    x = "Summed Grantham distance from the ama1 3D7 vaccine sequence",
-    y = "Number of samples",
-    color = "Haplotypes relationship to ama1 3D7",
-    shape = "Haplotypes relationship to ama1 3D7"
-  ) + 
-  guides(
-    color = guide_legend(
-      title.position = "top",
-      title.hjust = 0.5,
-      nrow = 1
-    ),
-    shape = guide_legend(
-      title.position = "top",
-      title.hjust = 0.5,
-      nrow = 1
-    )
-  ) + 
-  theme_minimal(base_size = 11, base_family = "Arial") +
-  theme(
-    axis.title = element_text(size = 11),
-    axis.text.x = element_text(size = 11, colour = "black"),
-    axis.text.y = element_text(size = 10, colour = "black"),
-    legend.title = element_text(size = 11),
-    legend.text  = element_text(size = 10),
-    legend.position = "bottom",
-    panel.grid.major = element_line(colour = "grey", linewidth = 0.1),
-    panel.grid.minor = element_line(colour = "grey", linewidth = 0.1),
-    panel.border = element_rect(
-      color = "black",
-      fill = NA,
-      linewidth = 0.3
-    ),
-    axis.ticks = element_line(linewidth = 0.3)
+  aes(
+    x = summed_grantham_distance,
+    y = n_samples,
+    colour = Group,
+    shape = Group
   )
+) +
+  # Points
+  geom_point(
+    size = 2.2,
+    alpha = 0.9
+  ) +
+
+  # Top 10 haplotypes
+  geom_text_repel(
+    data = subset(
+      plot_df,
+      haplotype %in% top10 &
+        Group != "Identical to 3D7"
+    ),
+    aes(label = haplotype),
+    size = 3,
+    family = "Arial",
+    segment.color = NA,
+    box.padding = 0.10,
+    point.padding = 0.08,
+    force = 0.7,
+    max.overlaps = Inf,
+    seed = 123
+  ) +
+
+  # Haplotypes identical to 3D7
+  geom_text_repel(
+    data = subset(
+      plot_df,
+      Group == "Identical to 3D7"
+    ),
+    aes(label = haplotype),
+    size = 3,
+    family = "Arial",
+    colour = "black",
+    nudge_x = -35,
+    direction = "y",
+    box.padding = 0.10,
+    point.padding = 0.15,
+    force = 3,
+    force_pull = 1,
+    segment.color = "black",
+    segment.size = 0.25,
+    min.segment.length = 0,
+    max.overlaps = Inf,
+    seed = 123
+  ) +
+
+  scale_colour_manual(
+    values = c(
+      "Identical to 3D7" = "#ca0020",
+      "Top 10 haplotypes" = "#0571b0",
+      "Other haplotypes" = "grey70"
+    )
+  ) +
+
+  scale_shape_manual(
+    values = c(
+      "Identical to 3D7" = 16,
+      "Top 10 haplotypes" = 16,
+      "Other haplotypes" = 16
+    )
+  ) +
+  guides(
+    colour = guide_legend(
+      override.aes = list(size = 3)
+    ),
+    shape = "none"
+  ) +
+  labs(
+    x = "Summed Grantham distance from ama1 3D7 vaccine sequence",
+    y = "Number of samples",
+    colour = NULL
+  ) +
+  theme_classic(base_size = 11, base_family = "Arial") +
+  theme(
+    axis.title.x = element_text(size = 12, colour = "black"),
+    axis.title.y = element_text(size = 12, colour = "black"),
+    axis.text.x = element_text(size = 10, colour = "black"),
+    axis.text.y = element_text(size = 10, colour = "black"),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "horizontal",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 10)
+  )
+
 # save
 ggsave(
-  filename = "figures/Fig10.tif", plot = Figure_10, width = 7.5, height = 4.5,
+  filename = "figures/Fig10.tif", plot = Figure_10_plot, width = 7.5, height = 4.5,
   units = "in", dpi = 600, compression = "lzw")
 
 ```
